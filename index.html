@@ -329,7 +329,7 @@
     width:38px; height:38px; border-radius:50%; background:var(--white); border:1px solid var(--line);
   }
   .listing-hero{
-    aspect-ratio: 16/7; display:flex; align-items:center; justify-content:center; position:relative;
+    aspect-ratio: 16/7; display:flex; align-items:center; justify-content:center; position:relative; overflow:hidden;
   }
   .listing-hero svg{width:34%; height:34%;}
   .listing-body{padding:0 40px 40px;}
@@ -446,6 +446,9 @@
   }
   .auth-field input:focus{outline:none; border-color:var(--pine); box-shadow:0 0 0 3px rgba(22,48,31,0.08);}
   .auth-field-hint{font-size:0.74rem; color:var(--slate);}
+  .field-hint{font-size:0.74rem; color:var(--slate);}
+  .field-hint.error{color:var(--rust);}
+  .field-hint.success{color:var(--pine);}
   .auth-row-between{display:flex; justify-content:space-between; align-items:center; margin-bottom:22px; font-size:0.83rem;}
   .auth-row-between a{color:var(--rust); font-weight:700; text-decoration:none; cursor:pointer;}
   .auth-row-between a:hover{text-decoration:underline;}
@@ -772,6 +775,14 @@
             <input type="number" id="fBeds" placeholder="e.g. 3">
           </div>
           <div class="form-field full">
+            <label for="fImage">Photo (optional)</label>
+            <input type="file" id="fImage" accept="image/*">
+            <div id="fImagePreviewWrap" style="display:none; margin-top:10px;">
+              <img id="fImagePreview" alt="Preview" style="max-width:100%; max-height:180px; border-radius:10px; border:1px solid var(--line);">
+            </div>
+            <p class="field-hint" id="fImageStatus" style="margin-top:6px;"></p>
+          </div>
+          <div class="form-field full">
             <label for="fDesc">Description</label>
             <textarea id="fDesc" placeholder="Road access, water source, lalpurja status, nearby landmarks..."></textarea>
           </div>
@@ -1020,6 +1031,33 @@
   const FAV_KEY = 'substate_favorites_v1';
   const TOKEN_KEY = 'substate_token';
 
+  /* ===================== PHOTO UPLOAD (Cloudinary) =====================
+     Fill these in once you've created a free Cloudinary account and an
+     UNSIGNED upload preset (Settings > Upload > Add upload preset > Signing
+     Mode: Unsigned). Both values below are safe to expose in frontend code
+     — they are not secret keys. Leave CLOUDINARY_CLOUD_NAME empty to keep
+     photo upload disabled (listings will just show the type icon instead). */
+  const CLOUDINARY_CLOUD_NAME = 'ocxmq4hl';
+const CLOUDINARY_UPLOAD_PRESET = 'substate';
+
+  async function uploadImageToCloudinary(file){
+    if(!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET){
+      throw new Error('Photo upload is not configured yet.');
+    }
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+    const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json();
+    if(!res.ok || !data.secure_url){
+      throw new Error(data.error && data.error.message ? data.error.message : 'Photo upload failed.');
+    }
+    return data.secure_url;
+  }
+
   function loadFavs(){
     try{ return JSON.parse(localStorage.getItem(FAV_KEY)) || []; }catch(e){ return []; }
   }
@@ -1144,16 +1182,19 @@
 
   function cardTemplate(l){
     const isFav = favorites.includes(l.id);
+    const thumbInner = l.imageUrl
+      ? `<img src="${l.imageUrl}" alt="${escapeHtml(l.title)}" style="width:100%; height:100%; object-fit:cover;">`
+      : ICONS[l.type];
     return `
     <article class="card" data-id="${l.id}">
-      <div class="thumb" style="background:${THUMB_BG[l.type]}">
+      <div class="thumb" style="background:${THUMB_BG[l.type]}; padding:0;">
         <span class="badge">${TYPE_LABEL[l.type]}</span>
         <button class="fav" data-fav="${l.id}" aria-label="Save listing">
           <svg viewBox="0 0 24 24" fill="${isFav ? '#B85C34' : 'none'}" stroke="#B85C34" stroke-width="2">
             <path d="M12 21s-7.5-4.6-10-9.2C.5 8.4 2.4 5 6 5c2 0 3.4 1 6 3.6C14.6 6 16 5 18 5c3.6 0 5.5 3.4 4 6.8C19.5 16.4 12 21 12 21z"/>
           </svg>
         </button>
-        ${ICONS[l.type]}
+        ${thumbInner}
       </div>
       <div class="card-body">
         <div class="card-price">${formatNPR(l.price)}</div>
@@ -1219,8 +1260,14 @@
   function openDetail(id){
     const l = listings.find(x => x.id === id);
     if(!l) return;
-    document.getElementById('listingHeroThumb').style.background = THUMB_BG[l.type];
-    document.getElementById('listingHeroThumb').innerHTML = ICONS[l.type];
+    const heroThumb = document.getElementById('listingHeroThumb');
+    if(l.imageUrl){
+      heroThumb.style.background = THUMB_BG[l.type];
+      heroThumb.innerHTML = `<img src="${l.imageUrl}" alt="${escapeHtml(l.title)}" style="width:100%; height:100%; object-fit:cover;">`;
+    } else {
+      heroThumb.style.background = THUMB_BG[l.type];
+      heroThumb.innerHTML = ICONS[l.type];
+    }
     document.getElementById('listingBadges').innerHTML = `
       <span class="badge">${TYPE_LABEL[l.type]}</span>
       <span class="badge">${l.district}</span>
@@ -1260,9 +1307,45 @@
     document.body.style.overflow = '';
   }
 
+  document.getElementById('fImage').addEventListener('change', function(){
+    const file = this.files[0];
+    const wrap = document.getElementById('fImagePreviewWrap');
+    const status = document.getElementById('fImageStatus');
+    if(!file){
+      wrap.style.display = 'none';
+      status.textContent = '';
+      return;
+    }
+    document.getElementById('fImagePreview').src = URL.createObjectURL(file);
+    wrap.style.display = 'block';
+    status.textContent = CLOUDINARY_CLOUD_NAME ? '' : 'Photo upload isn\'t configured on this deployment yet — this photo won\'t be saved.';
+    status.className = CLOUDINARY_CLOUD_NAME ? 'field-hint' : 'field-hint error';
+  });
+
   document.getElementById('listForm').addEventListener('submit', async function(e){
     e.preventDefault();
     const submitBtn = this.querySelector('button[type="submit"]');
+    const imageStatus = document.getElementById('fImageStatus');
+    const imageFile = document.getElementById('fImage').files[0];
+
+    let imageUrl = null;
+    if(imageFile){
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Uploading photo…';
+      imageStatus.textContent = 'Uploading photo…';
+      imageStatus.className = 'field-hint';
+      try{
+        imageUrl = await uploadImageToCloudinary(imageFile);
+      }catch(err){
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Publish listing';
+        imageStatus.textContent = err.message;
+        imageStatus.className = 'field-hint error';
+        showToast(err.message);
+        return;
+      }
+    }
+
     const payload = {
       title: document.getElementById('fTitle').value.trim(),
       type: document.getElementById('fType').value,
@@ -1273,7 +1356,8 @@
       beds: Number(document.getElementById('fBeds').value) || null,
       desc: document.getElementById('fDesc').value.trim(),
       sellerName: document.getElementById('fSellerName').value.trim(),
-      sellerPhone: document.getElementById('fSellerPhone').value.trim()
+      sellerPhone: document.getElementById('fSellerPhone').value.trim(),
+      imageUrl
     };
 
     submitBtn.disabled = true;
@@ -1294,6 +1378,8 @@
       const listing = { ...data.listing, id: data.listing._id, createdAt: new Date(data.listing.createdAt).getTime() };
       listings.unshift(listing);
       this.reset();
+      document.getElementById('fImagePreviewWrap').style.display = 'none';
+      imageStatus.textContent = '';
       closeListModal();
       showToast('Listing published successfully');
       populateDistrictOptions();
