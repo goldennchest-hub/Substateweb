@@ -552,6 +552,7 @@
         </button>
         <div class="dropdown-menu" id="dropdownMenu">
           <a href="#" id="favNavLink">Saved</a>
+          <a href="#" id="myListingsNavLink">My Listings</a>
           <div class="dropdown-divider"></div>
           <button id="openListBtnNav">+ List property</button>
         </div>
@@ -737,8 +738,8 @@
   <div class="modal" id="listModal" role="dialog" aria-modal="true" style="max-width:680px;">
     <button class="modal-close" id="closeList" aria-label="Close">✕</button>
     <div class="listing-body" style="padding:20px 40px 40px;">
-      <span class="eyebrow-sm">New listing</span>
-      <h3 class="listing-title" style="margin-bottom:20px;">List your property</h3>
+      <span class="eyebrow-sm" id="listModalEyebrow">New listing</span>
+      <h3 class="listing-title" style="margin-bottom:20px;" id="listModalHeading">List your property</h3>
       <form id="listForm">
         <div class="form-grid">
           <div class="form-field full">
@@ -795,7 +796,7 @@
             <input type="tel" id="fSellerPhone" placeholder="98XXXXXXXX" required>
           </div>
         </div>
-        <button type="submit" class="btn btn-primary" style="margin-top:22px; width:100%;">Publish listing</button>
+        <button type="submit" class="btn btn-primary" style="margin-top:22px; width:100%;" id="listFormSubmitBtn">Publish listing</button>
       </form>
     </div>
   </div>
@@ -926,6 +927,26 @@
         <div class="auth-switch-line">Already have an account? <a data-nav="login">Log in</a></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ============ MY LISTINGS VIEW ============ -->
+<div class="page-view" id="view-mylistings">
+  <div class="wrap" style="padding-top:48px; padding-bottom:80px;">
+    <button class="btn btn-ghost" data-nav="marketplace" style="margin-bottom:22px;">← Back to browsing</button>
+    <span class="eyebrow-sm">Your account</span>
+    <h2 class="listing-title" style="font-size:1.9rem; margin-bottom:6px;">My Listings</h2>
+    <p style="color:var(--slate); font-size:0.9rem; margin-bottom:28px;">Properties you've posted. Edit or remove them any time.</p>
+
+    <div id="myListingsSignedOut" style="display:none;">
+      <div class="empty-state">
+        <h3>Sign in to see your listings</h3>
+        <p>Listings are tied to the account you were logged into when you posted them.</p>
+        <button class="btn btn-primary" data-nav="login">Sign in</button>
+      </div>
+    </div>
+
+    <div class="grid" id="myListingsGrid"></div>
   </div>
 </div>
 
@@ -1297,14 +1318,46 @@
     document.body.style.overflow = '';
   }
 
-  /* ===================== LIST-PROPERTY MODAL ===================== */
-  function openListModal(){
+  /* ===================== LIST-PROPERTY MODAL (create + edit) ===================== */
+  let editingListingId = null;
+
+  function openListModal(listingToEdit){
+    const form = document.getElementById('listForm');
+    if(listingToEdit){
+      editingListingId = listingToEdit.id;
+      document.getElementById('listModalEyebrow').textContent = 'Edit listing';
+      document.getElementById('listModalHeading').textContent = 'Edit your property';
+      document.getElementById('listFormSubmitBtn').textContent = 'Save changes';
+      document.getElementById('fTitle').value = listingToEdit.title;
+      document.getElementById('fType').value = listingToEdit.type;
+      document.getElementById('fDistrict').value = listingToEdit.district;
+      document.getElementById('fCity').value = listingToEdit.city;
+      document.getElementById('fPrice').value = listingToEdit.price;
+      document.getElementById('fArea').value = listingToEdit.areaSqft;
+      document.getElementById('fBeds').value = listingToEdit.beds || '';
+      document.getElementById('fDesc').value = listingToEdit.desc || '';
+      document.getElementById('fSellerName').value = listingToEdit.sellerName;
+      document.getElementById('fSellerPhone').value = listingToEdit.sellerPhone;
+      if(listingToEdit.imageUrl){
+        document.getElementById('fImagePreview').src = listingToEdit.imageUrl;
+        document.getElementById('fImagePreviewWrap').style.display = 'block';
+      }
+    } else {
+      editingListingId = null;
+      document.getElementById('listModalEyebrow').textContent = 'New listing';
+      document.getElementById('listModalHeading').textContent = 'List your property';
+      document.getElementById('listFormSubmitBtn').textContent = 'Publish listing';
+      form.reset();
+      document.getElementById('fImagePreviewWrap').style.display = 'none';
+      document.getElementById('fImageStatus').textContent = '';
+    }
     document.getElementById('listOverlay').classList.add('open');
     document.body.style.overflow = 'hidden';
   }
   function closeListModal(){
     document.getElementById('listOverlay').classList.remove('open');
     document.body.style.overflow = '';
+    editingListingId = null;
   }
 
   document.getElementById('fImage').addEventListener('change', function(){
@@ -1324,7 +1377,9 @@
 
   document.getElementById('listForm').addEventListener('submit', async function(e){
     e.preventDefault();
-    const submitBtn = this.querySelector('button[type="submit"]');
+    const isEdit = !!editingListingId;
+    const submitBtn = document.getElementById('listFormSubmitBtn');
+    const defaultLabel = isEdit ? 'Save changes' : 'Publish listing';
     const imageStatus = document.getElementById('fImageStatus');
     const imageFile = document.getElementById('fImage').files[0];
 
@@ -1338,7 +1393,7 @@
         imageUrl = await uploadImageToCloudinary(imageFile);
       }catch(err){
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Publish listing';
+        submitBtn.textContent = defaultLabel;
         imageStatus.textContent = err.message;
         imageStatus.className = 'field-hint error';
         showToast(err.message);
@@ -1361,34 +1416,40 @@
     };
 
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Publishing…';
+    submitBtn.textContent = isEdit ? 'Saving…' : 'Publishing…';
     try{
-      const res = await fetch('/api/listings', {
-        method: 'POST',
+      const res = await fetch(isEdit ? `/api/listings/${editingListingId}` : '/api/listings', {
+        method: isEdit ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(payload)
       });
       const data = await res.json();
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Publish listing';
+      submitBtn.textContent = defaultLabel;
       if(!res.ok){
-        showToast(data.error || 'Could not publish your listing.');
+        showToast(data.error || (isEdit ? 'Could not save your changes.' : 'Could not publish your listing.'));
         return;
       }
       const listing = { ...data.listing, id: data.listing._id, createdAt: new Date(data.listing.createdAt).getTime() };
-      listings.unshift(listing);
+      if(isEdit){
+        const idx = listings.findIndex(l => l.id === listing.id);
+        if(idx !== -1) listings[idx] = listing; else listings.unshift(listing);
+      } else {
+        listings.unshift(listing);
+      }
       this.reset();
       document.getElementById('fImagePreviewWrap').style.display = 'none';
       imageStatus.textContent = '';
       closeListModal();
-      showToast('Listing published successfully');
+      showToast(isEdit ? 'Listing updated successfully' : 'Listing published successfully');
       populateDistrictOptions();
       render();
-      document.getElementById('browse').scrollIntoView({behavior:'smooth'});
+      if(document.getElementById('view-mylistings').classList.contains('active')) loadMyListings();
+      if(!isEdit) document.getElementById('browse').scrollIntoView({behavior:'smooth'});
     }catch(err){
       submitBtn.disabled = false;
-      submitBtn.textContent = 'Publish listing';
-      showToast('Network error — could not publish your listing.');
+      submitBtn.textContent = defaultLabel;
+      showToast('Network error — could not save your listing.');
     }
   });
 
@@ -1600,7 +1661,7 @@
   });
 
   ['openListBtnNav','openListBtnCta'].forEach(id => {
-    document.getElementById(id).addEventListener('click', openListModal);
+    document.getElementById(id).addEventListener('click', () => openListModal());
   });
   document.getElementById('favNavLink').addEventListener('click', e => {
     e.preventDefault();
@@ -1610,6 +1671,10 @@
     showView('marketplace');
     render();
     document.getElementById('browse').scrollIntoView({behavior:'smooth'});
+  });
+  document.getElementById('myListingsNavLink').addEventListener('click', e => {
+    e.preventDefault();
+    showView('mylistings');
   });
 
   /* ===================== VIEW ROUTER (in-page, no separate files) ===================== */
@@ -1621,6 +1686,7 @@
     if(target) target.classList.add('active');
     window.scrollTo(0, 0);
     if(name === 'admin') loadAdminData();
+    if(name === 'mylistings') loadMyListings();
   }
   // Any element with data-nav="marketplace|login|signup|admin" switches views without leaving the page.
   // If it also has an href="#something" pointing at a real section, scroll there after switching.
@@ -1780,6 +1846,102 @@
     document.getElementById('adminContent').style.display = 'none';
     document.getElementById('adminKeyError').classList.toggle('show', !!withError);
   }
+
+  /* ===================== MY LISTINGS (view + edit + delete) ===================== */
+  function myListingCardTemplate(l){
+    const thumbInner = l.imageUrl
+      ? `<img src="${l.imageUrl}" alt="${escapeHtml(l.title)}" style="width:100%; height:100%; object-fit:cover;">`
+      : ICONS[l.type];
+    return `
+    <article class="card" data-mine-id="${l.id}">
+      <div class="thumb" style="background:${THUMB_BG[l.type]}; padding:0;">
+        <span class="badge">${TYPE_LABEL[l.type]}</span>
+        ${thumbInner}
+      </div>
+      <div class="card-body">
+        <div class="card-price">${formatNPR(l.price)}</div>
+        <div class="card-title">${l.title}</div>
+        <div class="card-loc">📍 ${l.city}</div>
+        <div class="card-specs">
+          <span><b>${formatArea(l)}</b></span>
+          ${l.beds ? `<span><b>${l.beds}</b> bed</span>` : ''}
+        </div>
+        <div style="display:flex; gap:8px; margin-top:14px;">
+          <button class="btn btn-ghost" style="flex:1; padding:9px;" data-edit-id="${l.id}">Edit</button>
+          <button class="btn btn-ghost" style="flex:1; padding:9px; color:var(--rust);" data-delete-id="${l.id}">Delete</button>
+        </div>
+      </div>
+    </article>`;
+  }
+
+  async function loadMyListings(){
+    const grid = document.getElementById('myListingsGrid');
+    const signedOutBox = document.getElementById('myListingsSignedOut');
+    const session = getSession();
+    if(!session){
+      grid.innerHTML = '';
+      signedOutBox.style.display = 'block';
+      return;
+    }
+    signedOutBox.style.display = 'none';
+    grid.innerHTML = `<div class="empty-state"><h3>Loading your listings…</h3></div>`;
+    try{
+      const res = await fetch('/api/listings/mine', { headers: authHeaders() });
+      if(res.status === 401){
+        signedOutBox.style.display = 'block';
+        grid.innerHTML = '';
+        return;
+      }
+      const data = await res.json();
+      const mine = (data.listings || []).map(l => ({ ...l, id: l._id, createdAt: new Date(l.createdAt).getTime() }));
+      grid.innerHTML = mine.length
+        ? mine.map(myListingCardTemplate).join('')
+        : `<div class="empty-state">
+            <h3>No listings yet</h3>
+            <p>Properties you post will show up here so you can edit or remove them any time.</p>
+            <button class="btn btn-primary" id="myListingsEmptyCta">+ List property</button>
+          </div>`;
+      const emptyCta = document.getElementById('myListingsEmptyCta');
+      if(emptyCta) emptyCta.addEventListener('click', () => openListModal());
+    }catch(e){
+      grid.innerHTML = `<div class="empty-state"><h3>Could not load your listings</h3><p>Check your connection and try again.</p></div>`;
+    }
+  }
+
+  document.getElementById('myListingsGrid').addEventListener('click', async (e) => {
+    const editBtn = e.target.closest('[data-edit-id]');
+    if(editBtn){
+      const id = editBtn.dataset.editId;
+      try{
+        const res = await fetch(`/api/listings/${id}`);
+        const data = await res.json();
+        if(!res.ok){ showToast(data.error || 'Could not load that listing.'); return; }
+        const listing = { ...data.listing, id: data.listing._id, createdAt: new Date(data.listing.createdAt).getTime() };
+        showView('marketplace');
+        openListModal(listing);
+      }catch(err){
+        showToast('Network error — could not load that listing.');
+      }
+      return;
+    }
+
+    const deleteBtn = e.target.closest('[data-delete-id]');
+    if(deleteBtn){
+      const id = deleteBtn.dataset.deleteId;
+      if(!confirm('Delete this listing? This can\'t be undone.')) return;
+      try{
+        const res = await fetch(`/api/listings/${id}`, { method: 'DELETE', headers: authHeaders() });
+        const data = await res.json();
+        if(!res.ok){ showToast(data.error || 'Could not delete this listing.'); return; }
+        listings = listings.filter(l => l.id !== id);
+        showToast('Listing deleted');
+        render();
+        loadMyListings();
+      }catch(err){
+        showToast('Network error — could not delete this listing.');
+      }
+    }
+  });
 
   async function loadAdminData(){
     const storedKey = sessionStorage.getItem(ADMIN_KEY_STORAGE);
