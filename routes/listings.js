@@ -55,7 +55,7 @@ router.post('/', optionalAuth, async (req, res) => {
   try {
     const {
       title, type, district, city, price, areaSqft,
-      beds, desc, sellerName, sellerPhone
+      beds, desc, sellerName, sellerPhone, imageUrl
     } = req.body;
 
     if (!title || !type || !district || !city || !price || !areaSqft || !sellerName || !sellerPhone) {
@@ -77,7 +77,8 @@ router.post('/', optionalAuth, async (req, res) => {
       tags: ['New listing'],
       sellerName: String(sellerName).trim(),
       sellerPhone: String(sellerPhone).trim(),
-      sellerEmail: req.user ? req.user.email : null
+      sellerEmail: req.user ? req.user.email : null,
+      imageUrl: imageUrl && typeof imageUrl === 'string' && imageUrl.startsWith('https://') ? imageUrl : null
     });
 
     res.status(201).json({ listing });
