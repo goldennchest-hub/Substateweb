@@ -1,6 +1,6 @@
 const express = require('express');
 const Listing = require('../models/Listing');
-const { optionalAuth } = require('../middleware/auth');
+const { optionalAuth, requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 const VALID_TYPES = ['land', 'house', 'apartment', 'commercial'];
@@ -38,6 +38,17 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error('List listings error:', err);
     res.status(500).json({ error: 'Could not load listings.' });
+  }
+});
+
+// IMPORTANT: this must come BEFORE '/:id' or Express will treat "mine" as an id.
+router.get('/mine', requireAuth, async (req, res) => {
+  try {
+    const listings = await Listing.find({ sellerEmail: req.user.email }).sort({ createdAt: -1 });
+    res.json({ listings });
+  } catch (err) {
+    console.error('My listings error:', err);
+    res.status(500).json({ error: 'Could not load your listings.' });
   }
 });
 
@@ -85,6 +96,63 @@ router.post('/', optionalAuth, async (req, res) => {
   } catch (err) {
     console.error('Create listing error:', err);
     res.status(500).json({ error: 'Could not publish your listing.' });
+  }
+});
+
+router.put('/:id', requireAuth, async (req, res) => {
+  try {
+    const listing = await Listing.findById(req.params.id);
+    if (!listing) return res.status(404).json({ error: 'Listing not found.' });
+    if (!listing.sellerEmail || listing.sellerEmail !== req.user.email) {
+      return res.status(403).json({ error: 'You can only edit your own listings.' });
+    }
+
+    const {
+      title, type, district, city, price, areaSqft,
+      beds, desc, sellerName, sellerPhone, imageUrl
+    } = req.body;
+
+    if (!title || !type || !district || !city || !price || !areaSqft || !sellerName || !sellerPhone) {
+      return res.status(400).json({ error: 'Please fill in all required fields.' });
+    }
+    if (!VALID_TYPES.includes(type)) {
+      return res.status(400).json({ error: 'Invalid property type.' });
+    }
+
+    listing.title = String(title).trim();
+    listing.type = type;
+    listing.district = String(district).trim();
+    listing.city = String(city).trim();
+    listing.price = Number(price);
+    listing.areaSqft = Number(areaSqft);
+    listing.beds = beds ? Number(beds) : null;
+    listing.desc = desc ? String(desc).trim() : listing.desc;
+    listing.sellerName = String(sellerName).trim();
+    listing.sellerPhone = String(sellerPhone).trim();
+    if (imageUrl && typeof imageUrl === 'string' && imageUrl.startsWith('https://')) {
+      listing.imageUrl = imageUrl;
+    }
+
+    await listing.save();
+    res.json({ listing });
+  } catch (err) {
+    console.error('Update listing error:', err);
+    res.status(500).json({ error: 'Could not update your listing.' });
+  }
+});
+
+router.delete('/:id', requireAuth, async (req, res) => {
+  try {
+    const listing = await Listing.findById(req.params.id);
+    if (!listing) return res.status(404).json({ error: 'Listing not found.' });
+    if (!listing.sellerEmail || listing.sellerEmail !== req.user.email) {
+      return res.status(403).json({ error: 'You can only delete your own listings.' });
+    }
+    await listing.deleteOne();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Delete listing error:', err);
+    res.status(500).json({ error: 'Could not delete your listing.' });
   }
 });
 
